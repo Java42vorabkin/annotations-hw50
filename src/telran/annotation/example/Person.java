@@ -4,7 +4,7 @@ import java.time.LocalDate;
 
 import telran.annotation.*;
 
-//@Table
+@Table
 
 public class Person {
 @Id
