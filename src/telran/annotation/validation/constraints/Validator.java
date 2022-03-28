@@ -3,9 +3,8 @@ package telran.annotation.validation.constraints;
 import java.lang.annotation.Annotation;
 import java.lang.reflect.AnnotatedType;
 import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 import java.util.*;
-
-import telran.annotation.example.DataSql;
 
 public class Validator {
 /**
@@ -13,16 +12,24 @@ public class Validator {
  * @param obj
  * @return list constraint violation messages or empty list if no violations
  */
+	HashSet<Class<?>> clazzSet = new HashSet<>();
 	public List<String> validate(Object obj) {
 		List<String> violations = new LinkedList<>();
+		if(obj==null) { // !!! #1
+			violations.add("Validated object can not be null");
+			return violations;
+		}
+		clazzSet.add(obj.getClass());
 		Arrays.stream(obj.getClass().getDeclaredFields()).forEach(field -> validate(field, violations, obj));
 		return violations;
 	}
 	
 	private void validate(Field field, List<String> violations, Object obj) {
+		field.setAccessible(true);   // !!! #2
 		Valid annotation = field.getAnnotation(Valid.class);
 		if(annotation==null) {
-			regularValidation(field, violations, obj);
+			regValidation(field, violations, obj);
+//			regularValidation(field, violations, obj);
 			return;
 		}
 		// nested validation
@@ -33,11 +40,31 @@ public class Validator {
 			e.printStackTrace();
 			return;
 		}
-		Arrays.stream(nestedObj.getClass().getDeclaredFields()).forEach(f -> validate(f, violations, nestedObj));
+		// !!! #3
+		if(nestedObj != null && !clazzSet.contains(nestedObj.getClass())) {
+			clazzSet.add(nestedObj.getClass());
+			Arrays.stream(nestedObj.getClass().getDeclaredFields()).forEach(f -> validate(f, violations, nestedObj));
+		}
 	}
 	
-	private void regularValidation(Field field, List<String> violations,
-			Object obj)  {
+	private void regValidation(Field field, List<String> violations, Object obj)  {
+		for(Annotation annotation: field.getAnnotations()) {
+			String methodName = null;
+			try {
+				methodName = annotation.annotationType().getSimpleName().toLowerCase();
+				Method method = Validator.class.getDeclaredMethod(methodName, Field.class,  Object.class);
+				method.setAccessible(true);
+				String message = (String)method.invoke(this, field,  obj);
+				if (!message.isEmpty()) {
+					violations.add(message);
+				}				
+			}catch (Exception e) {
+				System.out.printf("anootation %s is not a validation annotation\n", methodName);
+			}
+		}		
+	}
+	
+	private void regularValidation(Field field, List<String> violations, Object obj)  {
 		String violationMsg = max(field, obj);
 		if(!violationMsg.isEmpty()) {
 			violations.add(violationMsg);
@@ -46,7 +73,7 @@ public class Validator {
 		if(!violationMsg.isEmpty()) {
 			violations.add(violationMsg);
 		}
-		violationMsg  = pattern(field, obj);
+		violationMsg  = patern(field, obj);
 		if(!violationMsg.isEmpty()) {
 			violations.add(violationMsg);
 		}
@@ -55,7 +82,8 @@ public class Validator {
 		Max annotation = field.getAnnotation(Max.class);
 		try {
 			if(annotation != null) {
-				double fieldValue = field.getDouble(obj);
+				// !!! #4
+				double fieldValue = Double.parseDouble(field.get(obj).toString());
 				double annotationValue = annotation.value();
 				if(fieldValue > annotationValue) {
 					return String.format("Field: %s.  %s : %,.0f is more than %,.0f",
@@ -71,7 +99,8 @@ public class Validator {
 		Min annotation = field.getAnnotation(Min.class);
 		try {
 			if(annotation != null) {
-				double fieldValue = field.getDouble(obj);
+				// !!! #5
+				double fieldValue = Double.parseDouble(field.get(obj).toString());
 				double annotationValue = annotation.value();
 				if(fieldValue < annotationValue) {
 					return String.format("Field: %s.  %s : %,.0f is less than %,.0f",
@@ -83,7 +112,7 @@ public class Validator {
 		}
 		return "";
 	}
-	private String pattern(Field field, Object obj) {
+	private String patern(Field field, Object obj) {
 		Patern annotation = field.getAnnotation(Patern.class);
 		try {
 			if(annotation != null) {
